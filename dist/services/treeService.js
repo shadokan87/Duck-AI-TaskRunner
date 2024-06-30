@@ -8,9 +8,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TreeService = void 0;
-const bun_1 = require("bun");
+const tree_cli_1 = __importDefault(require("tree-cli"));
 class TreeService {
     constructor(cwd = process.env.PWD) {
         this.cwd = cwd;
@@ -19,22 +22,15 @@ class TreeService {
         this.cwd = path;
         return this;
     }
-    list(option = {
-        report: false
-    }) {
+    list(option = { report: false }) {
         return __awaiter(this, void 0, void 0, function* () {
-            // console.log("++!cwd: ", this.cwd);
-            // console.log("!pwd: ", process.env.PWD);
-            const report = option.report ? '' : '--noreport';
-            // console.log("!cwd", this.cwd)
-            const result = yield (0, bun_1.$) `tree -J \
-    ${report} \
-    -I node_modules
-    .
-    `.cwd(this.cwd).text();
-            // console.log("!result", result);
-            const parsed = JSON.parse(result);
-            return parsed;
+            const result = yield (0, tree_cli_1.default)({
+                base: this.cwd,
+                noreport: true,
+                ignore: ['node_modules'],
+                l: 1000
+            });
+            return result.data;
         });
     }
 }

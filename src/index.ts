@@ -67,7 +67,14 @@ app.listen(port, async () => {
       return ;
     }
     instance = findInstance.data[0];
-    // services.tree.setCwd(instance.)
+    services.tree.setCwd(instance.project_root!);
+    try {
+      const tree = await services.tree.list();
+      await supabase.from('taskRunner').update({tree: JSON.stringify(tree)}).eq('id', instance.id);
+      console.log("!contents", tree);
+    } catch (error) {
+      console.error("Error listing tree contents: ", error);
+    }
   } catch(e) {
     console.log("[Failed to connect]: ", e);
   }
