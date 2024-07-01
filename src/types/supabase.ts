@@ -12,6 +12,7 @@ export type Database = {
       task: {
         Row: {
           attachments: Json[] | null
+          completion_response: Json | null
           created_at: string
           created_by: string | null
           id: number
@@ -20,6 +21,7 @@ export type Database = {
         }
         Insert: {
           attachments?: Json[] | null
+          completion_response?: Json | null
           created_at?: string
           created_by?: string | null
           id?: number
@@ -28,6 +30,7 @@ export type Database = {
         }
         Update: {
           attachments?: Json[] | null
+          completion_response?: Json | null
           created_at?: string
           created_by?: string | null
           id?: number
@@ -79,7 +82,12 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      taskState: "AWAITING_ATTACHMENTS" | "PROCESSING" | "COMPLETED" | "QUEUE"
+      taskState:
+        | "AWAITING_ATTACHMENTS"
+        | "PROCESSING"
+        | "COMPLETED"
+        | "QUEUE"
+        | "SYNCED"
     }
     CompositeTypes: {
       [_ in never]: never

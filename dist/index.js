@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.instance = void 0;
 const express_1 = __importDefault(require("express"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const env_1 = require("./env");
@@ -19,6 +20,10 @@ const services_1 = require("./services");
 const minimist_1 = __importDefault(require("minimist"));
 const supabase_js_1 = require("@supabase/supabase-js");
 const treeService_1 = require("./services/treeService");
+const bun_1 = require("bun");
+const axios_1 = __importDefault(require("axios"));
+const create_1 = require("./completionHandlers/create");
+const update_1 = require("./completionHandlers/update");
 // Load environment variables from .env file
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -28,7 +33,8 @@ const argv = (0, minimist_1.default)(process.argv.slice(2));
 const token = argv.token;
 const refresh = argv.refresh;
 const supabase = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
-let instance = undefined;
+let subscriptions = [];
+exports.instance = undefined;
 let user = undefined;
 function connectTaskRunner() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -39,6 +45,9 @@ function connectTaskRunner() {
 }
 function onServerStop() {
     return __awaiter(this, void 0, void 0, function* () {
+        subscriptions.forEach((subscription) => __awaiter(this, void 0, void 0, function* () {
+            yield subscription.unsubscribe();
+        }));
         if (!user)
             return;
         yield supabase.from('taskRunner').delete().neq('id', -1);
@@ -79,11 +88,11 @@ app.listen(port, () => __awaiter(void 0, void 0, void 0, function* () {
             console.error(findInstance.error);
             return;
         }
-        instance = findInstance.data[0];
-        services.tree.setCwd(instance.project_root);
+        exports.instance = findInstance.data[0];
+        services.tree.setCwd(exports.instance.project_root);
         try {
             const tree = yield services.tree.list();
-            yield supabase.from('taskRunner').update({ tree: JSON.stringify(tree) }).eq('id', instance.id);
+            yield supabase.from('taskRunner').update({ tree: JSON.stringify(tree) }).eq('id', exports.instance.id);
             console.log("!contents", tree);
         }
         catch (error) {
@@ -93,6 +102,72 @@ app.listen(port, () => __awaiter(void 0, void 0, void 0, function* () {
     catch (e) {
         console.log("[Failed to connect]: ", e);
     }
+    const changes = supabase
+        .channel('schema-db-changes')
+        .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+    }, (payload) => __awaiter(void 0, void 0, void 0, function* () {
+        switch (payload.table) {
+            case 'task':
+                if (payload.eventType == 'INSERT') {
+                    if (payload.new.state == "AWAITING_ATTACHMENTS") {
+                        console.log("[Serving task]: ", payload.new.id);
+                        const attachments = yield Promise.all(payload.new.attachments.map((attachment) => __awaiter(void 0, void 0, void 0, function* () {
+                            const content = yield (0, bun_1.$) `cat ${attachment.path}`;
+                            console.log(`exit: ${content.exitCode}`);
+                            return Object.assign(Object.assign({}, attachment), { content: content.text() });
+                        })));
+                        console.log(JSON.stringify(attachments));
+                        yield supabase.from('task').update({ attachments: attachments }).eq('id', payload.new.id);
+                        try {
+                            yield axios_1.default.post("http://localhost:3000/queue", { task_id: payload.new.id, project_root: exports.instance === null || exports.instance === void 0 ? void 0 : exports.instance.project_root }, { headers: { Authorization: token } });
+                        }
+                        catch (e) {
+                            console.error("[Failed to queue task]", e['response']['status'], e['response']['statusText']);
+                        }
+                    }
+                }
+                else if (payload.eventType == 'UPDATE') {
+                    if (payload.new.state == 'COMPLETED') {
+                        const completion = payload.new.completion_response;
+                        completion.choices.forEach(choice => {
+                            var _a;
+                            (_a = choice.message.tool_calls) === null || _a === void 0 ? void 0 : _a.forEach(tool => {
+                                if (tool.type == 'function') {
+                                    const snippetData = JSON.parse(tool.function.arguments);
+                                    switch (snippetData.actionType) {
+                                        case 'create': {
+                                            (0, create_1.handleCreate)(snippetData);
+                                            break;
+                                        }
+                                        case 'update': {
+                                            (0, update_1.handleUpdate)(snippetData);
+                                            break;
+                                        }
+                                        default:
+                                            { //do nothing 
+                                            }
+                                    }
+                                }
+                            });
+                        });
+                        console.log("!!type", typeof payload.new.completion_response);
+                    }
+                    console.log("!received update: ", payload);
+                }
+                break;
+            default:
+                // Ignore event
+                break;
+        }
+    }))
+        .subscribe();
+    // // const taskSubscription = supabase
+    // //   .channel('task')
+    // //   .on('postgres_changes', { event: '*', schema: 'public', table: 'task' }, handleTaskInsert)
+    // //   .subscribe();
+    // subscriptions.push(taskSubscription);
     console.log(`⚡️[server]: TaskRunner Server is running at https://localhost:${port}`);
 }));
 process.on('SIGINT', () => __awaiter(void 0, void 0, void 0, function* () {
